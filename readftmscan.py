@@ -1,20 +1,68 @@
 import requests
 import json
+import time
+import argparse
+import os
 
-walletString = "My PWA Wallet"
 
-transactions = 'https://api.ftmscan.com/api?module=account&action=txlist&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}'.format(PWA_address, APIKEY)
-transactionsR = requests.get(transactions)
-transactionsResult = json.loads(transactionsR.content)['result']
+def parseArgs():
+    arg_parser = argparse.ArgumentParser(
+        description='FTM Scan to usable CSV parser', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    arg_parser.add_argument('--ftmscan-api-key', '-k', default='', help='API key from ftmscan.com')
+    arg_parser.add_argument('--wallet-address', '-a', default='', help='Address of wallet for which to retrieve transactions')
+    known_args, _unknown_args = arg_parser.parse_known_args()
 
-tokenTransfers='https://api.ftmscan.com/api?module=account&action=tokentx&address={}&startblock=0&endblock=999999999&sort=asc&apikey={}'.format(PWA_address, APIKEY)
-tokenTransfersR = requests.get(tokenTransfers)
-tokenTransferResult = json.loads(tokenTransfersR.content)['result']
+    return known_args
 
-print("Value,Token,From,To,Hash")
-def decodeTransaction(hash):
+def fetchContractFiles(contractDir='tmp/Contracts'):
+   curDir = os.getcwd()
+   if os.path.exists(contractDir):
+      os.system('rm -rf {} > /dev/null 2>&1'.format(contractDir))
+   os.system('mkdir -p {} > /dev/null 2>&1'.format(contractDir))
+   os.chdir(contractDir)
+   os.system('git init > /dev/null 2>&1')
+   os.system('git remote add -f origin https://github.com/Fantom-foundation/fantom-api-graphql > /dev/null 2>&1')
+   os.system('git config core.sparseCheckout true > /dev/null 2>&1')
+   os.system('echo "internal/repository/rpc/contracts/" >> .git/info/sparse-checkout')
+   os.system('git pull origin master > /dev/null 2>&1')
+   os.chdir(curDir)
+   contractContents = []
+   fullpath = os.path.join(contractDir, 'internal/repository/rpc/contracts/')
+   for filename in os.listdir(fullpath):
+      if filename.endswith('.go'):
+         with open(os.path.join(fullpath, filename)) as fp:
+            contractContents.extend(fp.readlines())
+   if os.path.exists(contractDir):
+      os.system('rm -rf {} > /dev/null 2>&1'.format(contractDir))
+   return contractContents
+
+def getPrepareToWithdrawDelegation(hash):
+   r = requests.get('https://ftmscan.com/tx/{}#eventlog'.format(hash))
+   lines = r.content.decode('ascii', 'ignore').split('\n')
+   for line in lines:
+      if 'chunk_ori_2_1' in line:
+         return float(int(line.split("chunk_ori_2_1'>")[1].split('</span>')[0],16))/1000000000000000000
+
+def getClaimDelegationRewards(hash):
+   r = requests.get('https://ftmscan.com/tx/{}#eventlog'.format(hash))
+   lines = r.content.decode('ascii', 'ignore').split('\n')
+   for line in lines:
+      if 'chunk_ori_1_1' in line:
+         return float(int(line.split("chunk_ori_1_1'>")[1].split('</span>')[0], 16))/1000000000000000000
+
+def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
+  walletString = "My PWA Wallet"
   r = requests.get('https://ftmscan.com/tx/{}'.format(hash))
   lines = r.content.decode('ascii', 'ignore').split('\n')
+  price = ''
+  status = 'Success'
+  transactionstoPrint = []
+  for line in lines:
+     if 'ContentPlaceHolder1_spanClosingPrice' in line:
+        price = line.replace(' / FTM</span>','').replace('<span id="ContentPlaceHolder1_spanClosingPrice">', '')
+     if 'Status:' in line:
+        if '</i>Fail</span>' in line:
+           status = 'Fail'
   for line in lines:
     if 'View Contract Internal Transactions' in line:
       sentLine = line.split('TRANSFER</span> &nbsp;')[1].replace("<b>.</b>", '.').split("<span class='text-secondary'>")
@@ -23,7 +71,7 @@ def decodeTransaction(hash):
       toAddress = sentLine[2].split("<a href='/address/")[1].split("' ")[0]
       token = value.split(' ')[1]
       value = value.split(' ')[0]
-      print("{},{},{},{},{}".format(value, token, fromAddress.replace(pwaWallet, walletString), toAddress.replace(pwaWallet, walletString), hash))
+      transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(value, token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
     if 'Tokens Transferred:' in line:
       toAddress = ''
       fromAddress = ''
@@ -52,7 +100,52 @@ def decodeTransaction(hash):
               token = x.strip().split(" ")[-1].replace('(', '').replace(')', '')
               if "color=''>" in x:
                 token = x.split("title='")[-1].split("'><")[0]
-            print("{},{},{},{},{}".format(value.replace(',', ''), token, fromAddress.replace(pwaWallet, walletString), toAddress.replace(pwaWallet, walletString), hash))
+            transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(value.replace(',', ''), token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
 
-for transaction in transactionsResult:
-  decodeTransaction(transaction['hash'])
+  if len(transactionstoPrint) == 0:
+     value = ''
+     token = ''
+     toAddress = ''
+     fromAddress = ''
+     if methodID == 'PrepareToWithdrawDelegation':
+        token = 'FTM'
+        value = getPrepareToWithdrawDelegation(hash)
+        toAddress = pwaWallet
+        fromAddress = '0xfc00face00000000000000000000000000000000'
+     if methodID == 'ClaimDelegationRewards':
+        token = 'FTM'
+        value = getClaimDelegationRewards(hash)
+        toAddress = pwaWallet
+        fromAddress = '0xfc00face00000000000000000000000000000000'
+     transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(value, token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
+   
+  for tx in transactionstoPrint:
+      print(tx.replace(pwaWallet, walletString))
+
+
+if __name__ == '__main__':
+   args = parseArgs()
+   PWA_address = args.wallet_address
+   APIKEY = args.ftmscan_api_key
+
+   transactions = 'https://api.ftmscan.com/api?module=account&action=txlist&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}'.format(PWA_address, APIKEY)
+   transactionsR = requests.get(transactions)
+   transactionsResult = json.loads(transactionsR.content)['result']
+
+   print("Value,Token,From,To,Hash,Method,Timestamp,Fee,HistoricalPrice,Status")
+
+   contractContents = fetchContractFiles()
+   for transaction in transactionsResult:
+      gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
+      gasUsed = float(gasUsed)/1000000000000000000
+      input = transaction['input'][0:10]
+
+      for line in contractContents:
+         if "{}.".format(input) in line:
+            input = line.split(' ')[1]
+            break
+      decodeTransaction(transaction['hash'], PWA_address, input, transaction['timeStamp'], gasUsed)
+      time.sleep(5)
+
+
+   
