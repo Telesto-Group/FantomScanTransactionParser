@@ -17,7 +17,7 @@ def parseArgs():
     return known_args
 
 
-def fetchContractFiles(contractDir='tmp/Contracts'):
+def fetchContractFiles(contractDir='ftmContracts'):
     curDir = os.getcwd()
     if os.path.exists(contractDir):
         os.system('rm -rf {} > /dev/null 2>&1'.format(contractDir))
