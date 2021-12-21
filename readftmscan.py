@@ -169,7 +169,7 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
     with open('transactions.csv', 'a') as f:
         for tx in transactionstoPrint:
           line = tx.replace(pwaWallet, walletString).replace(delegationAddress, delegationString)
-          if walletString in line or ",,," in line:
+          if walletString in line or ",,," in line or delegationString in line:
             f.write('{}\n'.format(line))
 
 
@@ -205,30 +205,21 @@ if __name__ == '__main__':
         f.write(
             "Date,Timestamp,Value,Token,From,To,Hash,Method,Fee,HistoricalPriceOfFTM,Status\n")
 
-    # contractContents = fetchContractFiles()
+    contractContents = fetchContractFiles()
     
-
     transactionHashes = {}
 
-    # for transaction in tokenTransactionsResult:
-    #   transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
+    for transaction in tokenTransactionsResult:
+      transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
 
-    print(len(tokenTransactionsResult))
-
-    # for transaction in transactionsResult:
-    #   transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
+    for transaction in transactionsResult:
+      transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
 
     sortedDict = OrderedDict()
 
-    print(len(transactionsResult))
-
-    # for hash in transactionHashes:
-    #   decodeTransaction(hash, PWA_address, transactionHashes[hash]['input'], transactionHashes[hash]['timeStamp'], transactionHashes[hash]['gasUsed'])
-
     sortedDict = sorted(transactionHashes.items(), key=lambda x:x[1]['timeStamp'])
-    print(len(sortedDict))
-    # for transaction in sortedDict:
-    #   decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'])
-      # time.sleep(3)
+    for transaction in sortedDict:
+      decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'])
+      time.sleep(3)
 
     
