@@ -74,18 +74,22 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
                 status = 'Fail'
     for line in lines:
         if 'View Contract Internal Transactions' in line:
-            sentLine = line.split('TRANSFER</span> &nbsp;')[1].replace(
-                "<b>.</b>", '.').split("<span class='text-secondary'>")
-            value = sentLine[0].replace(',', '').replace(
-                '(', '').replace(')', '')
-            fromAddress = sentLine[1].split(
-                "' class='hash-tag text-truncate'")[0].split("From</span> <a href='/address/")[1]
-            toAddress = sentLine[2].split(
-                "<a href='/address/")[1].split("' ")[0]
-            token = value.split(' ')[1]
-            value = value.split(' ')[0]
-            transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(
-                value, token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
+            transfers = line.split('TRANSFER')
+            for transfer in transfers:
+              if '</span> &nbsp;' in transfer:
+                sentLine = transfer.split('</span> &nbsp;')[1].replace(
+                    "<b>.</b>", '.').split("<span class='text-secondary'>")
+
+                value = sentLine[0].replace(',', '').replace(
+                    '(', '').replace(')', '')
+                fromAddress = sentLine[1].split(
+                    "' class='hash-tag text-truncate'")[0].split("From</span> <a href='/address/")[1]
+                toAddress = sentLine[2].split(
+                    "<a href='/address/")[1].split("' ")[0]
+                token = value.split(' ')[1]
+                value = value.split(' ')[0]
+                transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(
+                    value, token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
         if 'Tokens Transferred:' in line:
             toAddress = ''
             fromAddress = ''
@@ -124,6 +128,11 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
         token = ''
         toAddress = ''
         fromAddress = ''
+        if methodID == 'CreateDelegation':
+            token = 'FTM'
+            value = getClaimDelegationRewards(hash)
+            toAddress = '0xfc00face00000000000000000000000000000000'
+            fromAddress = pwaWallet
         if methodID == 'PrepareToWithdrawDelegation':
             token = 'FTM'
             value = getPrepareToWithdrawDelegation(hash)
@@ -139,7 +148,9 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
 
     with open('transactions.csv', 'a') as f:
         for tx in transactionstoPrint:
-            f.write('{}\n'.format(tx.replace(pwaWallet, walletString)))
+          line = tx.replace(pwaWallet, walletString)
+          if walletString in line or ",,," in line:
+            f.write('{}\n'.format(line))
 
 
 if __name__ == '__main__':
@@ -149,22 +160,47 @@ if __name__ == '__main__':
 
     transactions = 'https://api.ftmscan.com/api?module=account&action=txlist&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}'.format(
         PWA_address, APIKEY)
+    tokenTransactions = 'https://api.ftmscan.com/api?module=account&action=tokentx&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}'.format(
+        PWA_address, APIKEY)
     transactionsR = requests.get(transactions)
     transactionsResult = json.loads(transactionsR.content)['result']
+    tokenTransactionsR = requests.get(tokenTransactions)
+    tokenTransactionsResult = json.loads(tokenTransactionsR.content)['result']
 
     with open('transactions.csv', 'w') as f:
         f.write(
             "Value,Token,From,To,Hash,Method,Timestamp,Fee,HistoricalPrice,Status\n")
 
     contractContents = fetchContractFiles()
-    for transaction in transactionsResult:
-       gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
-       gasUsed = float(gasUsed)/1000000000000000000
-       input = transaction['input'][0:10]
 
-       for line in contractContents:
-          if "{}.".format(input) in line:
-             input = line.split(' ')[1]
-             break
-       decodeTransaction(transaction['hash'], PWA_address, input, transaction['timeStamp'], gasUsed)
-       time.sleep(5)
+    transactionHashes = {}
+
+    for transaction in tokenTransactionsResult:
+      transactionHashes[transaction['hash']] = {}
+      transactionHashes[transaction['hash']]['timeStamp'] = transaction['timeStamp']
+      gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
+      gasUsed = float(gasUsed)/1000000000000000000
+      transactionHashes[transaction['hash']]['gasUsed'] = gasUsed
+      input = transaction['input'][0:10]
+      for line in contractContents:
+        if "{}.".format(input) in line:
+          input = line.split(' ')[1]
+          break
+      transactionHashes[transaction['hash']]['input'] = input
+
+    for transaction in transactionsResult:
+      transactionHashes[transaction['hash']] = {}
+      transactionHashes[transaction['hash']]['timeStamp'] = transaction['timeStamp']
+      gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
+      gasUsed = float(gasUsed)/1000000000000000000
+      transactionHashes[transaction['hash']]['gasUsed'] = gasUsed
+      input = transaction['input'][0:10]
+      for line in contractContents:
+        if "{}.".format(input) in line:
+          input = line.split(' ')[1]
+          break
+      transactionHashes[transaction['hash']]['input'] = input
+
+    for hash in transactionHashes:
+      decodeTransaction(hash, PWA_address, transactionHashes[hash]['input'], transactionHashes[hash]['timeStamp'], transactionHashes[hash]['gasUsed'])
+      time.sleep(3)
