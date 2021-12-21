@@ -3,6 +3,9 @@ import json
 import time
 import argparse
 import os
+import copy
+from collections import OrderedDict
+import datetime
 
 
 def parseArgs():
@@ -15,7 +18,6 @@ def parseArgs():
     known_args, _unknown_args = arg_parser.parse_known_args()
 
     return known_args
-
 
 def fetchContractFiles(contractDir='ftmContracts'):
     curDir = os.getcwd()
@@ -41,25 +43,33 @@ def fetchContractFiles(contractDir='ftmContracts'):
         os.system('rm -rf {} > /dev/null 2>&1'.format(contractDir))
     return contractContents
 
-
-def getPrepareToWithdrawDelegation(hash):
+def getFirstValueInSecondLog(hash):
     r = requests.get('https://ftmscan.com/tx/{}#eventlog'.format(hash))
     lines = r.content.decode('ascii', 'ignore').split('\n')
     for line in lines:
         if 'chunk_ori_2_1' in line:
             return float(int(line.split("chunk_ori_2_1'>")[1].split('</span>')[0], 16))/1000000000000000000
 
+def getSecondValueInFirstLog(hash):
+    r = requests.get('https://ftmscan.com/tx/{}#eventlog'.format(hash))
+    lines = r.content.decode('ascii', 'ignore').split('\n')
+    for line in lines:
+        if 'chunk_ori_1_2' in line:
+            return float(int(line.split("chunk_ori_1_2'>")[1].split('</span>')[0], 16))/1000000000000000000
 
-def getClaimDelegationRewards(hash):
+def getFirstValueInFirstLog(hash):
     r = requests.get('https://ftmscan.com/tx/{}#eventlog'.format(hash))
     lines = r.content.decode('ascii', 'ignore').split('\n')
     for line in lines:
         if 'chunk_ori_1_1' in line:
             return float(int(line.split("chunk_ori_1_1'>")[1].split('</span>')[0], 16))/1000000000000000000
 
-
 def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
+    dt_object = datetime.datetime.fromtimestamp(int(timestamp))
+    dateString = dt_object.strftime("%m/%d/%Y %H:%M:%S")
     walletString = "My PWA Wallet"
+    delegationString = "My Delegated Wallet"
+    delegationAddress = '0xfc00face00000000000000000000000000000000'
     r = requests.get('https://ftmscan.com/tx/{}'.format(hash))
     lines = r.content.decode('ascii', 'ignore').split('\n')
     price = ''
@@ -88,8 +98,8 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
                     "<a href='/address/")[1].split("' ")[0]
                 token = value.split(' ')[1]
                 value = value.split(' ')[0]
-                transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(
-                    value, token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
+                transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
+                    dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
         if 'Tokens Transferred:' in line:
             toAddress = ''
             fromAddress = ''
@@ -120,38 +130,62 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
                                 " ")[-1].replace('(', '').replace(')', '')
                             if "color=''>" in x:
                                 token = x.split("title='")[-1].split("'><")[0]
-                        transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(value.replace(
-                            ',', ''), token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
+                        transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(dateString, timestamp, value.replace(
+                            ',', ''), token, fromAddress, toAddress, hash, methodID, fee, price, status))
 
     if len(transactionstoPrint) == 0:
         value = ''
         token = ''
         toAddress = ''
         fromAddress = ''
+        if methodID == 'ClaimDelegationCompoundRewards':
+            token = 'FTM'
+            value = getSecondValueInFirstLog(hash)
+            toAddress = '0xfc00face00000000000000000000000000000000'
+            fromAddress = 'Delgation Rewards'
+        if methodID == 'RestakeRewards':
+            token = 'FTM'
+            value = getFirstValueInSecondLog(hash)
+            toAddress = '0xfc00face00000000000000000000000000000000'
+            fromAddress = 'Delgation Rewards'
         if methodID == 'CreateDelegation':
             token = 'FTM'
-            value = getClaimDelegationRewards(hash)
+            value = getFirstValueInFirstLog(hash)
             toAddress = '0xfc00face00000000000000000000000000000000'
             fromAddress = pwaWallet
         if methodID == 'PrepareToWithdrawDelegation':
             token = 'FTM'
-            value = getPrepareToWithdrawDelegation(hash)
+            value = getFirstValueInSecondLog(hash)
             toAddress = pwaWallet
             fromAddress = '0xfc00face00000000000000000000000000000000'
         if methodID == 'ClaimDelegationRewards':
             token = 'FTM'
-            value = getClaimDelegationRewards(hash)
+            value = getFirstValueInFirstLog(hash)
             toAddress = pwaWallet
-            fromAddress = '0xfc00face00000000000000000000000000000000'
-        transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{}".format(
-            value, token, fromAddress, toAddress, hash, methodID, timestamp, fee, price, status))
+            fromAddress = 'Delgation Rewards'
+        transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
+            dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
 
     with open('transactions.csv', 'a') as f:
         for tx in transactionstoPrint:
-          line = tx.replace(pwaWallet, walletString)
+          line = tx.replace(pwaWallet, walletString).replace(delegationAddress, delegationString)
           if walletString in line or ",,," in line:
             f.write('{}\n'.format(line))
 
+
+def getTransactionInfo(transaction):
+  transactionDict = {}
+  transactionDict['timeStamp'] = transaction['timeStamp']
+  gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
+  gasUsed = float(gasUsed)/1000000000000000000
+  transactionDict['gasUsed'] = gasUsed
+  input = transaction['input'][0:10]
+  for line in contractContents:
+    if "{}.".format(input) in line:
+      input = line.split(' ')[1]
+      break
+  transactionDict['input'] = input
+  return copy.deepcopy(transactionDict)
 
 if __name__ == '__main__':
     args = parseArgs()
@@ -169,38 +203,32 @@ if __name__ == '__main__':
 
     with open('transactions.csv', 'w') as f:
         f.write(
-            "Value,Token,From,To,Hash,Method,Timestamp,Fee,HistoricalPrice,Status\n")
+            "Date,Timestamp,Value,Token,From,To,Hash,Method,Fee,HistoricalPriceOfFTM,Status\n")
 
-    contractContents = fetchContractFiles()
+    # contractContents = fetchContractFiles()
+    
 
     transactionHashes = {}
 
-    for transaction in tokenTransactionsResult:
-      transactionHashes[transaction['hash']] = {}
-      transactionHashes[transaction['hash']]['timeStamp'] = transaction['timeStamp']
-      gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
-      gasUsed = float(gasUsed)/1000000000000000000
-      transactionHashes[transaction['hash']]['gasUsed'] = gasUsed
-      input = transaction['input'][0:10]
-      for line in contractContents:
-        if "{}.".format(input) in line:
-          input = line.split(' ')[1]
-          break
-      transactionHashes[transaction['hash']]['input'] = input
+    # for transaction in tokenTransactionsResult:
+    #   transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
 
-    for transaction in transactionsResult:
-      transactionHashes[transaction['hash']] = {}
-      transactionHashes[transaction['hash']]['timeStamp'] = transaction['timeStamp']
-      gasUsed = int(transaction['gasUsed']) * int(transaction['gasPrice'])
-      gasUsed = float(gasUsed)/1000000000000000000
-      transactionHashes[transaction['hash']]['gasUsed'] = gasUsed
-      input = transaction['input'][0:10]
-      for line in contractContents:
-        if "{}.".format(input) in line:
-          input = line.split(' ')[1]
-          break
-      transactionHashes[transaction['hash']]['input'] = input
+    print(len(tokenTransactionsResult))
 
-    for hash in transactionHashes:
-      decodeTransaction(hash, PWA_address, transactionHashes[hash]['input'], transactionHashes[hash]['timeStamp'], transactionHashes[hash]['gasUsed'])
-      time.sleep(3)
+    # for transaction in transactionsResult:
+    #   transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
+
+    sortedDict = OrderedDict()
+
+    print(len(transactionsResult))
+
+    # for hash in transactionHashes:
+    #   decodeTransaction(hash, PWA_address, transactionHashes[hash]['input'], transactionHashes[hash]['timeStamp'], transactionHashes[hash]['gasUsed'])
+
+    sortedDict = sorted(transactionHashes.items(), key=lambda x:x[1]['timeStamp'])
+    print(len(sortedDict))
+    # for transaction in sortedDict:
+    #   decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'])
+      # time.sleep(3)
+
+    
