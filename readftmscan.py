@@ -169,6 +169,8 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
     with open('transactions.csv', 'a') as f:
         for tx in transactionstoPrint:
           line = tx.replace(pwaWallet, walletString).replace(delegationAddress, delegationString)
+          if 'ClaimRewards' in line:
+            line = line.replace(delegationString, 'Delgation Rewards')
           if walletString in line or ",,," in line or delegationString in line:
             f.write('{}\n'.format(line))
 
