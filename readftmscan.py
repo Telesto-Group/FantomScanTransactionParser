@@ -15,6 +15,13 @@ def parseArgs():
                             default='', help='API key from ftmscan.com')
     arg_parser.add_argument('--wallet-address', '-a', default='',
                             help='Address of wallet for which to retrieve transactions')
+    arg_parser.add_argument('--ignore-failed', '-if', action='store_true',
+                            help='Do not record failed transactions')
+    arg_parser.add_argument('--ignore-zero-value', '-izv', action='store_true',
+                            help='Do not record transactions if no tokens were moved')
+    arg_parser.set_defaults(ignore_failed=False)
+    arg_parser.set_defaults(ignore_zero_value=False)
+
     known_args, _unknown_args = arg_parser.parse_known_args()
 
     return known_args
@@ -64,17 +71,16 @@ def getFirstValueInFirstLog(hash):
         if 'chunk_ori_1_1' in line:
             return float(int(line.split("chunk_ori_1_1'>")[1].split('</span>')[0], 16))/1000000000000000000
 
-def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
+def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddress):
     dt_object = datetime.datetime.fromtimestamp(int(timestamp))
     dateString = dt_object.strftime("%m/%d/%Y %H:%M:%S")
-    walletString = "My PWA Wallet"
-    delegationString = "My Delegated Wallet"
-    delegationAddress = '0xfc00face00000000000000000000000000000000'
+    
     r = requests.get('https://ftmscan.com/tx/{}'.format(hash))
     lines = r.content.decode('ascii', 'ignore').split('\n')
     price = ''
     status = 'Success'
     transactionstoPrint = []
+    
     for line in lines:
         if 'ContentPlaceHolder1_spanClosingPrice' in line:
             price = line.replace(
@@ -82,6 +88,19 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
         if 'Status:' in line:
             if '</i>Fail</span>' in line:
                 status = 'Fail'
+
+    if methodID == 'SwapExactETHForTokens':
+      token = 'FTM'
+      fromAddress = pwaWallet
+      for line in lines:
+        if 'ContentPlaceHolder1_spanValue' in line:
+            value = line.split("with the transaction'>")[1].split("</span>")[0].replace(
+                ' FTM', '').replace(',', '').replace('<b>.</b>', '.')
+        if 'contractCopy' in line:
+            toAddress = line.split("href='/address/")[1].split("'")[0]
+      transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
+            dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
+
     for line in lines:
         if 'View Contract Internal Transactions' in line:
             transfers = line.split('TRANSFER')
@@ -100,6 +119,7 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
                 value = value.split(' ')[0]
                 transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
                     dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
+
         if 'Tokens Transferred:' in line:
             toAddress = ''
             fromAddress = ''
@@ -130,50 +150,55 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee):
                                 " ")[-1].replace('(', '').replace(')', '')
                             if "color=''>" in x:
                                 token = x.split("title='")[-1].split("'><")[0]
-                        transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(dateString, timestamp, value.replace(
-                            ',', ''), token, fromAddress, toAddress, hash, methodID, fee, price, status))
+                        value = value.replace(',', '')
+                        transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
+                            dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
+
+        if 'ContentPlaceHolder1_spanValue' in line and methodID in ['Delegate']:
+            value = line.split("with the transaction'>")[1].split("</span>")[0].replace(
+                ' FTM', '').replace(',', '').replace('<b>.</b>', '.')
 
     if len(transactionstoPrint) == 0:
-        value = ''
         token = ''
         toAddress = ''
         fromAddress = ''
+        if methodID == 'Delegate':
+          token = 'FTM'
+          toAddress = delegationAddress
+          fromAddress = pwaWallet
+        else:
+          value = ''
+
         if methodID == 'ClaimDelegationCompoundRewards':
             token = 'FTM'
             value = getSecondValueInFirstLog(hash)
-            toAddress = '0xfc00face00000000000000000000000000000000'
+            toAddress = delegationAddress
             fromAddress = 'Delgation Rewards'
         if methodID == 'RestakeRewards':
             token = 'FTM'
             value = getFirstValueInSecondLog(hash)
-            toAddress = '0xfc00face00000000000000000000000000000000'
+            toAddress = delegationAddress
             fromAddress = 'Delgation Rewards'
         if methodID == 'CreateDelegation':
             token = 'FTM'
             value = getFirstValueInFirstLog(hash)
-            toAddress = '0xfc00face00000000000000000000000000000000'
+            toAddress = delegationAddress
             fromAddress = pwaWallet
         if methodID == 'PrepareToWithdrawDelegation':
             token = 'FTM'
             value = getFirstValueInSecondLog(hash)
             toAddress = pwaWallet
-            fromAddress = '0xfc00face00000000000000000000000000000000'
+            fromAddress = delegationAddress
         if methodID == 'ClaimDelegationRewards':
             token = 'FTM'
             value = getFirstValueInFirstLog(hash)
             toAddress = pwaWallet
             fromAddress = 'Delgation Rewards'
+        
         transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
             dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
 
-    with open('transactions.csv', 'a') as f:
-        for tx in transactionstoPrint:
-          line = tx.replace(pwaWallet, walletString).replace(delegationAddress, delegationString)
-          if 'ClaimRewards' in line:
-            line = line.replace(delegationString, 'Delgation Rewards')
-          if walletString in line or ",,," in line or delegationString in line:
-            f.write('{}\n'.format(line))
-
+    return transactionstoPrint
 
 def getTransactionInfo(transaction):
   transactionDict = {}
@@ -189,10 +214,27 @@ def getTransactionInfo(transaction):
   transactionDict['input'] = input
   return copy.deepcopy(transactionDict)
 
+def writeTransactions(decodedTransactions, walletAddress, delegationAddress, ignoreZeroValue):
+  walletString = "My PWA Wallet"
+  delegationString = "My Delegated Wallet"
+
+  with open('transactions.csv', 'a') as f:
+    for tx in decodedTransactions:
+      line = tx.replace(walletAddress, walletString).replace(delegationAddress, delegationString)
+      if 'ClaimRewards' in line:
+        line = line.replace(delegationString, 'Delgation Rewards')
+      if any(ele in line for ele in [walletString, ",,,", delegationString]):
+        if 'Success' in line or not args.ignore_failed:
+          if not any(ele in line for ele in ['Vote', 'CancelVote', 'Approve', 'LockStake']) or not ignoreZeroValue:
+            f.write('{}\n'.format(line))
+
+
 if __name__ == '__main__':
     args = parseArgs()
     PWA_address = args.wallet_address
     APIKEY = args.ftmscan_api_key
+
+    delegationAddress = '0xfc00face00000000000000000000000000000000'
 
     transactions = 'https://api.ftmscan.com/api?module=account&action=txlist&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}'.format(
         PWA_address, APIKEY)
@@ -221,7 +263,8 @@ if __name__ == '__main__':
 
     sortedDict = sorted(transactionHashes.items(), key=lambda x:x[1]['timeStamp'])
     for transaction in sortedDict:
-      decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'])
+      decodedTransactions = decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'], delegationAddress)
+      writeTransactions(set(decodedTransactions), PWA_address, delegationAddress, args.ignore_zero_value)
       time.sleep(3)
 
     
