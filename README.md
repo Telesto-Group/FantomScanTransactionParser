@@ -4,7 +4,7 @@ Combines the faulty ftmscan api with the faulty ftmscan web interface for a more
 
 1. install git and python: `apt-get update && apt-get install git python -y`
 
-1. clone this repo: `git clone https://github.com/mhetzel/FantomScanTransactionParser`
+1. clone this repo: `git clone https://github.com/Telesto-Group/FantomScanTransactionParser`
 
 1. install python dependencies: `pip install -r requirements.txt`
 
