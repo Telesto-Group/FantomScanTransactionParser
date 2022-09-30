@@ -20,7 +20,7 @@ def parseArgs():
     arg_parser.add_argument('--ignore-zero-value', '-izv', action='store_true',
                             help='Do not record transactions if no tokens were moved')
     arg_parser.add_argument('--verbose', '-v', action='store_true',
-                            help='Do not record transactions if no tokens were moved')
+                            help='show extra logging')
     arg_parser.add_argument('--before-timestamp', '-bt', default='',
                             help='Only get transactions up to this timestamp')
     arg_parser.add_argument('--after-timestamp', '-at', default='',
@@ -280,8 +280,8 @@ if __name__ == '__main__':
     for transaction in sortedDict:
       # if int(transaction[1]['timeStamp']) > 1651803322:
       # if transaction[0] == '0x957e7d4a89737f9fcc744268ff8744394a4156aaebc03cda922b684f9fe40b03':
-        # if verbose:
-      print(transaction[0])
+      if args.verbose:
+        print(transaction[0])
       decodedTransactions = decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'], delegationAddress)
       writeTransactions(set(decodedTransactions), PWA_address, delegationAddress, args.ignore_zero_value)
       time.sleep(3)
