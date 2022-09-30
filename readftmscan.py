@@ -247,7 +247,16 @@ if __name__ == '__main__':
     PWA_address = args.wallet_address
     APIKEY = args.ftmscan_api_key
 
+    begin_timestamp = 0
+    end_timestamp = 2000000000
 
+    if args.before_timestamp:
+      end_timestamp = int(args.before_timestamp)
+    if args.after_timestamp:
+      begin_timestamp = int(args.after_timestamp)
+
+    if args.verbose:
+      print('retreiving contracts')
     contractContents = fetchContractFiles()
 
     start_time = datetime.datetime.now()
@@ -257,6 +266,9 @@ if __name__ == '__main__':
         PWA_address, APIKEY)
     tokenTransactions = 'https://api.ftmscan.com/api?module=account&action=tokentx&address={}&startblock=0&endblock=99999999&sort=asc&apikey={}'.format(
         PWA_address, APIKEY)
+
+    if args.verbose:
+      print('retreiving transactions')
     transactionsR = requests.get(transactions)
     transactionsResult = json.loads(transactionsR.content)['result']
     tokenTransactionsR = requests.get(tokenTransactions)
@@ -268,6 +280,8 @@ if __name__ == '__main__':
     
     transactionHashes = {}
 
+    if args.verbose:
+      print('pre-parsing transactions')
     for transaction in tokenTransactionsResult:
       transactionHashes[transaction['hash']] = getTransactionInfo(transaction)
 
@@ -277,14 +291,17 @@ if __name__ == '__main__':
     sortedDict = OrderedDict()
 
     sortedDict = sorted(transactionHashes.items(), key=lambda x:x[1]['timeStamp'])
+
+    if args.verbose:
+      print('writing transactions')
     for transaction in sortedDict:
-      # if int(transaction[1]['timeStamp']) > 1651803322:
-      # if transaction[0] == '0x957e7d4a89737f9fcc744268ff8744394a4156aaebc03cda922b684f9fe40b03':
-      if args.verbose:
-        print(transaction[0])
-      decodedTransactions = decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'], delegationAddress)
-      writeTransactions(set(decodedTransactions), PWA_address, delegationAddress, args.ignore_zero_value)
-      time.sleep(3)
+      if int(transaction[1]['timeStamp']) > begin_timestamp and int(transaction[1]['timeStamp']) < end_timestamp:
+        if (not args.hash or (args.hash and transaction[0] == args.hash)):
+          if args.verbose:
+            print('reading:', transaction[0])
+          decodedTransactions = decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'], delegationAddress)
+          writeTransactions(set(decodedTransactions), PWA_address, delegationAddress, args.ignore_zero_value)
+          time.sleep(3)
 
     end_time = datetime.datetime.now()
     print('Duration: {}'.format(end_time - start_time))
