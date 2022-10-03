@@ -115,13 +115,15 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddre
       transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
             dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
 
-    if methodID in ['SwapExactETHForTokens', 'AddLiquidityETH', '0x']:
+    if methodID in ['SwapExactETHForTokens', 'AddLiquidityETH', '0x', '0x53574150']:
       token = 'FTM'
       fromAddress = pwaWallet
       for line in lines:
         if 'ContentPlaceHolder1_spanValue' in line:
             value = line.split("with the transaction'>")[1].split("</span>")[0].replace(
                 ' FTM', '').replace(',', '').replace('<b>.</b>', '.')
+        if 'addressCopy' in line:
+            fromAddress = line.split("href='/address/")[1].split("'")[0]
         if 'contractCopy' in line:
             toAddress = line.split("href='/address/")[1].split("'")[0]
       transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
@@ -165,9 +167,21 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddre
                             .replace(" </a></div></li></ul></div></div>", "")\
                             .replace("For</b> </span><span class='mr-1'>", "")
                         if 'WFTM' in x:
-                            value = x.split('WFTM">')[1].split(' ')[0]
-                            token = x.split('WFTM">')[1].split(
-                                ' ')[-1].replace('(', '').replace(')', '')
+                            try:
+                              value = x.split('WFTM">')[1].split(' ')[0]
+                            except:
+                              try:
+                                value = x.split('</span>')[0]
+                              except:
+                                value = x
+                            try:
+                              token = x.split('WFTM">')[1].split(
+                                  ' ')[-1].replace('(', '').replace(')', '')
+                            except:
+                              try:
+                                token = x.split("'>")[-1].replace('(', '').replace(')', '')
+                              except:
+                                token = x.replace('(', '').replace(')', '')
                         else:
                             value = x.split(" ")[0]
                             if "<span" in value:
@@ -232,7 +246,8 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddre
             toAddress = pwaWallet
             fromAddress = 'Delgation Rewards'
         else:
-          print('unknown', methodID)
+          if not methodID in ['Vote', 'CancelVote', 'Approve', 'LockStake', 'Undelegate'] and status == 'Success':
+            print('unknown', methodID)
         
         transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
             dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
@@ -267,10 +282,10 @@ def writeTransactions(decodedTransactions, walletAddress, delegationAddress, ign
       line = line.replace('0xad84341756bf337f5a0164515b1f6f993d194e1f', 'Fantom Finance: fUSD Token').replace('0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83', 'Fantom Finance: Wrapped Fantom Token')
       if 'ClaimRewards' in line:
         line = line.replace(delegationString, 'Delgation Rewards')
-      # if any(ele in line for ele in [walletString, ",,,", delegationString]):
-      if 'Success' in line or not args.ignore_failed:
-        if not any(ele in line for ele in ['Vote', 'CancelVote', 'Approve', 'LockStake']) or not ignoreZeroValue:
-          f.write('{}\n'.format(line))
+      if any(ele in line for ele in [walletString, ",,,", delegationString, 'Fantom: SFC']):
+        if 'Success' in line or not args.ignore_failed:
+          if not any(ele in line for ele in ['Vote', 'CancelVote', 'Approve', 'LockStake', 'Undelegate']) or not ignoreZeroValue:
+            f.write('{}\n'.format(line))
 
 
 if __name__ == '__main__':
@@ -342,7 +357,4 @@ if __name__ == '__main__':
 
     end_time = datetime.datetime.now()
     print('Duration: {}'.format(end_time - start_time))
-
-    
-
 
