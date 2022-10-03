@@ -79,6 +79,13 @@ def getFirstValueInFirstLog(hash):
         if 'chunk_ori_1_1' in line:
             return float(int(line.split("chunk_ori_1_1'>")[1].split('</span>')[0], 16))/1000000000000000000
 
+def getDataValueInFirstLog(hash):
+    r = requests.get('https://ftmscan.com/tx/{}#eventlog'.format(hash))
+    lines = r.content.decode('ascii', 'ignore').split('\n')
+    for line in lines:
+        if 'value (uint256 )' in line:
+            return float(int(line.split("value (uint256 )")[1].replace("'>",'').split('</span>')[0], 16))/1000000000000000000
+
 def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddress):
     dt_object = datetime.datetime.fromtimestamp(int(timestamp))
     dateString = dt_object.strftime("%m/%d/%Y %H:%M:%S")
@@ -97,8 +104,18 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddre
             if '</i>Fail</span>' in line:
                 status = 'Fail'
 
+    if methodID in ['IncreaseAllowance']:
+      token = 'WFTM'
+      value = getDataValueInFirstLog(hash)
+      for line in lines:
+        if 'addressCopy' in line:
+          fromAddress = line.split("href='/address/")[1].split("'")[0]
+        if 'contractCopy' in line:
+          toAddress = line.split("href='/address/")[1].split("'")[0]
+      transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
+            dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
 
-    if methodID in ['SwapExactETHForTokens', 'AddLiquidityETH']:
+    if methodID in ['SwapExactETHForTokens', 'AddLiquidityETH', '0x']:
       token = 'FTM'
       fromAddress = pwaWallet
       for line in lines:
@@ -178,31 +195,43 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddre
         else:
           value = ''
 
-        if methodID == 'ClaimDelegationCompoundRewards':
+        if methodID == 'ClaimValidatorRewards':
+            token = 'FTM'
+            value = getFirstValueInFirstLog(hash)
+            toAddress = 'Fantom: SFC'
+            fromAddress = 'Validator Rewards'
+        elif methodID == 'ClaimValidatorRewards':
+            token = 'FTM'
+            value = getFirstValueInFirstLog(hash)
+            toAddress = 'Fantom: SFC'
+            fromAddress = 'Validator Rewards'
+        elif methodID == 'ClaimDelegationCompoundRewards':
             token = 'FTM'
             value = getSecondValueInFirstLog(hash)
             toAddress = delegationAddress
             fromAddress = 'Delgation Rewards'
-        if methodID == 'RestakeRewards':
+        elif methodID == 'RestakeRewards':
             token = 'FTM'
             value = getFirstValueInSecondLog(hash)
             toAddress = delegationAddress
             fromAddress = 'Delgation Rewards'
-        if methodID == 'CreateDelegation':
+        elif methodID == 'CreateDelegation':
             token = 'FTM'
             value = getFirstValueInFirstLog(hash)
             toAddress = delegationAddress
             fromAddress = pwaWallet
-        if methodID == 'PrepareToWithdrawDelegation':
+        elif methodID == 'PrepareToWithdrawDelegation':
             token = 'FTM'
             value = getFirstValueInSecondLog(hash)
             toAddress = pwaWallet
             fromAddress = delegationAddress
-        if methodID == 'ClaimDelegationRewards':
+        elif methodID == 'ClaimDelegationRewards':
             token = 'FTM'
             value = getFirstValueInFirstLog(hash)
             toAddress = pwaWallet
             fromAddress = 'Delgation Rewards'
+        else:
+          print('unknown', methodID)
         
         transactionstoPrint.append("{},{},{},{},{},{},{},{},{},{},{}".format(
             dateString, timestamp, value, token, fromAddress, toAddress, hash, methodID, fee, price, status))
@@ -234,6 +263,7 @@ def writeTransactions(decodedTransactions, walletAddress, delegationAddress, ign
   with open('transactions.csv', 'a') as f:
     for tx in decodedTransactions:
       line = tx.replace(walletAddress, walletString).replace(delegationAddress, delegationString)
+      line = line.replace('0xad84341756bf337f5a0164515b1f6f993d194e1f', 'Fantom Finance: fUSD Token').replace('0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83', 'Fantom Finance: Wrapped Fantom Token')
       if 'ClaimRewards' in line:
         line = line.replace(delegationString, 'Delgation Rewards')
       if any(ele in line for ele in [walletString, ",,,", delegationString]):
@@ -244,7 +274,7 @@ def writeTransactions(decodedTransactions, walletAddress, delegationAddress, ign
 
 if __name__ == '__main__':
     args = parseArgs()
-    PWA_address = args.wallet_address
+    PWA_address = args.wallet_address.lower()
     APIKEY = args.ftmscan_api_key
 
     begin_timestamp = 0
@@ -299,10 +329,16 @@ if __name__ == '__main__':
         if (not args.hash or (args.hash and transaction[0] == args.hash)):
           if args.verbose:
             print('reading:', transaction[0])
-          decodedTransactions = decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'], delegationAddress)
-          writeTransactions(set(decodedTransactions), PWA_address, delegationAddress, args.ignore_zero_value)
+          try:
+            decodedTransactions = decodeTransaction(transaction[0], PWA_address, transaction[1]['input'], transaction[1]['timeStamp'], transaction[1]['gasUsed'], delegationAddress)
+            writeTransactions(set(decodedTransactions), PWA_address, delegationAddress, args.ignore_zero_value)
+          except:
+            print('error with', transaction[0])
           time.sleep(3)
 
     end_time = datetime.datetime.now()
     print('Duration: {}'.format(end_time - start_time))
+
     
+
+
