@@ -184,6 +184,7 @@ def decodeTransaction(hash, pwaWallet, methodID, timestamp, fee, delegationAddre
             value = line.split("with the transaction'>")[1].split("</span>")[0].replace(
                 ' FTM', '').replace(',', '').replace('<b>.</b>', '.')
 
+
     if len(transactionstoPrint) == 0:
         token = ''
         toAddress = ''
@@ -266,16 +267,19 @@ def writeTransactions(decodedTransactions, walletAddress, delegationAddress, ign
       line = line.replace('0xad84341756bf337f5a0164515b1f6f993d194e1f', 'Fantom Finance: fUSD Token').replace('0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83', 'Fantom Finance: Wrapped Fantom Token')
       if 'ClaimRewards' in line:
         line = line.replace(delegationString, 'Delgation Rewards')
-      if any(ele in line for ele in [walletString, ",,,", delegationString]):
-        if 'Success' in line or not args.ignore_failed:
-          if not any(ele in line for ele in ['Vote', 'CancelVote', 'Approve', 'LockStake']) or not ignoreZeroValue:
-            f.write('{}\n'.format(line))
+      # if any(ele in line for ele in [walletString, ",,,", delegationString]):
+      if 'Success' in line or not args.ignore_failed:
+        if not any(ele in line for ele in ['Vote', 'CancelVote', 'Approve', 'LockStake']) or not ignoreZeroValue:
+          f.write('{}\n'.format(line))
 
 
 if __name__ == '__main__':
     args = parseArgs()
     PWA_address = args.wallet_address.lower()
     APIKEY = args.ftmscan_api_key
+
+    if args.verbose:
+      print('Pulling transactions for:', PWA_address)
 
     begin_timestamp = 0
     end_timestamp = 2000000000
